@@ -21,10 +21,14 @@ def create_chat_model(settings: Settings) -> BaseChatModel:
         raise MissingAPIKeyError(
             "GEMINI_API_KEY não configurada. Copie .env.example para .env e preencha a chave."
         )
+    optional_params = {}
+    if settings.gemini_temperature is not None:
+        optional_params["temperature"] = settings.gemini_temperature
+
     return ChatGoogleGenerativeAI(
         model=settings.gemini_model,
         api_key=settings.gemini_api_key,
-        temperature=settings.gemini_temperature,
         timeout=settings.llm_timeout_seconds,
         max_retries=2,
+        **optional_params,
     )

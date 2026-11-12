@@ -93,3 +93,14 @@ def test_unexpected_error_returns_generic_500(client: TestClient) -> None:
     assert response.status_code == 500
     assert response.json() == {"detail": "Erro interno do servidor."}
     assert "segredo" not in response.text
+
+
+def test_temperature_is_only_sent_when_configured() -> None:
+    from app.config import Settings
+    from app.llm import create_chat_model
+
+    default_model = create_chat_model(Settings(gemini_api_key="fake-key"))
+    tuned_model = create_chat_model(Settings(gemini_api_key="fake-key", gemini_temperature=0.3))
+
+    assert default_model.temperature is None
+    assert tuned_model.temperature == 0.3

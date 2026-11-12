@@ -15,8 +15,9 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     gemini_api_key: SecretStr | None = None
-    gemini_model: str = "gemini-2.5-flash"
-    gemini_temperature: float = Field(default=0.0, ge=0.0, le=2.0)
+    gemini_model: str = "gemini-3.5-flash-lite"
+    # Opcional: os modelos Gemini mais novos usam amostragem fixa e ignoram a temperatura.
+    gemini_temperature: float | None = Field(default=None, ge=0.0, le=2.0)
     llm_timeout_seconds: float = Field(default=60.0, gt=0)
 
     agent_max_iterations: int = Field(default=5, ge=1, le=20)

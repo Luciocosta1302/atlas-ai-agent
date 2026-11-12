@@ -18,7 +18,7 @@ Construído com **Python 3.11+, LangGraph, LangChain, Gemini, FastAPI e Pydantic
   - `generate_report` – grava relatórios `.txt` em um diretório isolado
 - Limite configurável de iterações do agente
 - Validação de entrada com Pydantic e tratamento de erros com códigos HTTP adequados
-- 62 testes automatizados que **não precisam de chave de API**
+- 63 testes automatizados que **não precisam de chave de API**
 
 ## Estrutura
 
@@ -98,8 +98,8 @@ sem acesso à rede e sem chave de API.
 | Variável | Padrão | Descrição |
 | --- | --- | --- |
 | `GEMINI_API_KEY` | — | Chave da API do Gemini (obrigatória para `/chat`) |
-| `GEMINI_MODEL` | `gemini-2.5-flash` | Modelo do Gemini |
-| `GEMINI_TEMPERATURE` | `0.0` | Temperatura do modelo |
+| `GEMINI_MODEL` | `gemini-3.5-flash-lite` | Modelo do Gemini (veja os disponíveis no [AI Studio](https://aistudio.google.com)) |
+| `GEMINI_TEMPERATURE` | — | Opcional; os modelos Gemini mais novos ignoram este parâmetro |
 | `LLM_TIMEOUT_SECONDS` | `60` | Timeout das chamadas ao modelo |
 | `AGENT_MAX_ITERATIONS` | `5` | Máximo de chamadas ao modelo por requisição (1–20) |
 | `DEFAULT_TIMEZONE` | `America/Sao_Paulo` | Fuso padrão da ferramenta de data |
