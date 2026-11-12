@@ -21,11 +21,22 @@ from app.api.schemas import (
     ToolCallOut,
 )
 from app.config import Settings, get_settings
+from app.security import WEB_UI_CSP, enforce_rate_limit, require_api_token
 
 logger = logging.getLogger(__name__)
-router = APIRouter()
 
-WEB_UI = FilePath(__file__).resolve().parent.parent / "static" / "index.html"
+STATIC_DIR = FilePath(__file__).resolve().parent.parent / "static"
+
+# Rotas públicas: interface web e verificação de saúde.
+public_router = APIRouter()
+# Rotas que consomem o LLM ou mexem em conversas: limite de requisições + token.
+protected_router = APIRouter(
+    dependencies=[Depends(enforce_rate_limit), Depends(require_api_token)],
+    responses={
+        401: {"model": ErrorResponse, "description": "Token ausente ou inválido"},
+        429: {"model": ErrorResponse, "description": "Limite de requisições atingido"},
+    },
+)
 
 
 def validated_chat_request(
@@ -48,21 +59,22 @@ ValidChatRequest = Annotated[ChatRequest, Depends(validated_chat_request)]
 Agent = Annotated[AgentService, Depends(get_agent_service)]
 
 
-@router.get("/", include_in_schema=False)
+@public_router.get("/", include_in_schema=False)
 async def web_ui() -> FileResponse:
-    return FileResponse(WEB_UI)
+    return FileResponse(STATIC_DIR / "index.html", headers={"Content-Security-Policy": WEB_UI_CSP})
 
 
-@router.get("/health", tags=["infra"])
+@public_router.get("/health", tags=["infra"])
 async def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
-@router.post(
+@protected_router.post(
     "/chat",
     response_model=ChatResponse,
     tags=["agent"],
     responses={
+        404: {"model": ErrorResponse, "description": "Conversa não encontrada ou expirada"},
         422: {"description": "Entrada inválida"},
         502: {"model": ErrorResponse, "description": "Falha no provedor de LLM"},
         503: {"model": ErrorResponse, "description": "Agente não configurado"},
@@ -80,16 +92,26 @@ async def chat(request: ValidChatRequest, agent: Agent) -> ChatResponse:
     )
 
 
-@router.post(
+async def resolved_thread_id(request: ValidChatRequest, agent: Agent) -> str:
+    """Cria ou valida a conversa antes do streaming (para ainda poder responder 404)."""
+    return await agent.resolve_thread(request.thread_id)
+
+
+@protected_router.post(
     "/chat/stream",
     response_class=EventSourceResponse,
     tags=["agent"],
     responses={
+        404: {"model": ErrorResponse, "description": "Conversa não encontrada ou expirada"},
         422: {"description": "Entrada inválida"},
         503: {"model": ErrorResponse, "description": "Agente não configurado"},
     },
 )
-async def chat_stream(request: ValidChatRequest, agent: Agent) -> AsyncIterable[ServerSentEvent]:
+async def chat_stream(
+    request: ValidChatRequest,
+    agent: Agent,
+    thread_id: Annotated[str, Depends(resolved_thread_id)],
+) -> AsyncIterable[ServerSentEvent]:
     """Mesma tarefa do POST /chat, mas com Server-Sent Events.
 
     Eventos: ``token``, ``tool_call``, ``tool_result``, ``done`` e ``error``.
@@ -97,7 +119,7 @@ async def chat_stream(request: ValidChatRequest, agent: Agent) -> AsyncIterable[
     durante a execução chegam como um evento ``error``.
     """
     try:
-        async for event in agent.stream(request.message, request.thread_id):
+        async for event in agent.stream(request.message, thread_id):
             yield ServerSentEvent(event=event.type, data=event.data)
     except AgentExecutionError as exc:
         yield ServerSentEvent(event="error", data={"detail": str(exc)})
@@ -106,7 +128,9 @@ async def chat_stream(request: ValidChatRequest, agent: Agent) -> AsyncIterable[
         yield ServerSentEvent(event="error", data={"detail": "Erro interno do servidor."})
 
 
-@router.delete("/threads/{thread_id}", status_code=status.HTTP_204_NO_CONTENT, tags=["agent"])
+@protected_router.delete(
+    "/threads/{thread_id}", status_code=status.HTTP_204_NO_CONTENT, tags=["agent"]
+)
 async def delete_thread(
     thread_id: Annotated[str, Path(pattern=THREAD_ID_PATTERN)], agent: Agent
 ) -> Response:

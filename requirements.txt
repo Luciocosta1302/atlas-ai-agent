@@ -1,6 +1,8 @@
 # Dependências de execução
 langchain-core>=1.8,<2
 langgraph>=1.2,<2
+langgraph-checkpoint-sqlite>=3.1,<4
+aiosqlite>=0.22,<1
 langchain-google-genai>=4.5,<5
 fastapi>=0.162,<1
 uvicorn[standard]>=0.54,<1

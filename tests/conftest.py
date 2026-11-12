@@ -9,9 +9,9 @@ from langchain_core.messages import AIMessage
 from langgraph.checkpoint.memory import InMemorySaver
 
 from app.agent import AgentService, build_agent_graph
-from app.api.dependencies import get_agent_service
 from app.config import get_settings
 from app.main import app
+from app.memory import ConversationStore, InMemoryThreadRepository
 from app.tools import build_tools
 from tests.fakes import ScriptedChatModel
 
@@ -19,15 +19,15 @@ from tests.fakes import ScriptedChatModel
 @pytest.fixture(autouse=True)
 def isolated_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[None]:
     """Garante que nenhum teste use uma chave real nem grave fora de tmp_path."""
-    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    for name in ("GEMINI_API_KEY", "ATLAS_API_TOKEN"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("DATABASE_PATH", str(tmp_path / "data" / "atlas.db"))
     monkeypatch.setenv("REPORTS_DIR", str(tmp_path / "reports"))
     monkeypatch.chdir(tmp_path)  # evita ler um .env do desenvolvedor
     get_settings.cache_clear()
-    get_agent_service.cache_clear()
     yield
     app.dependency_overrides.clear()
     get_settings.cache_clear()
-    get_agent_service.cache_clear()
 
 
 @pytest.fixture
@@ -41,14 +41,15 @@ def make_service(reports_dir: Path) -> Callable[..., tuple[AgentService, Scripte
         responses: list[AIMessage], max_iterations: int = 5, max_history_messages: int = 30
     ) -> tuple[AgentService, ScriptedChatModel]:
         model = ScriptedChatModel(responses=responses)
+        store = ConversationStore(checkpointer=InMemorySaver(), threads=InMemoryThreadRepository())
         graph = build_agent_graph(
             model=model,
             tools=build_tools("America/Sao_Paulo", reports_dir),
             max_iterations=max_iterations,
             max_history_messages=max_history_messages,
-            checkpointer=InMemorySaver(),
+            checkpointer=store.checkpointer,
         )
-        return AgentService(graph, max_iterations=max_iterations), model
+        return AgentService(graph, store, max_iterations=max_iterations), model
 
     return _make
 
