@@ -27,7 +27,26 @@ class Settings(BaseSettings):
     reports_dir: Path = Path("reports")
 
     max_message_length: int = Field(default=2000, ge=1, le=20_000)
+
+    # Memória persistente
+    database_path: Path = Path("data/atlas.db")
+    conversation_ttl_hours: float = Field(default=72, gt=0)
+
+    # Segurança
+    atlas_api_token: SecretStr | None = None
+    rate_limit_per_minute: int = Field(default=20, ge=1)
+    max_request_bytes: int = Field(default=64_000, ge=1_024)
     log_level: str = "INFO"
+
+    @model_validator(mode="after")
+    def api_token_is_strong(self) -> Settings:
+        if self.atlas_api_token is not None:
+            token = self.atlas_api_token.get_secret_value()
+            if not token:  # ATLAS_API_TOKEN= vazio no .env equivale a "não definido"
+                self.atlas_api_token = None
+            elif len(token) < 16:
+                raise ValueError("ATLAS_API_TOKEN deve ter pelo menos 16 caracteres.")
+        return self
 
     @model_validator(mode="after")
     def history_fits_one_full_turn(self) -> Settings:

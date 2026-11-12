@@ -10,8 +10,8 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 # verificado na rota, pois o schema é definido em tempo de importação.
 HARD_MAX_MESSAGE_LENGTH = 20_000
 
-# Letras, números, "_" e "-", até 64 caracteres (ex.: um UUID).
-THREAD_ID_PATTERN = r"^[A-Za-z0-9_-]{1,64}$"
+# Formato dos ids gerados pelo servidor: 32 caracteres hexadecimais (128 bits).
+THREAD_ID_PATTERN = r"^[0-9a-f]{32}$"
 
 
 class ChatRequest(BaseModel):

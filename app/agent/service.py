@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import uuid
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import Any
@@ -13,11 +12,17 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.errors import GraphRecursionError
 from langgraph.graph.state import CompiledStateGraph
 
+from app.memory import ConversationStore
+
 logger = logging.getLogger(__name__)
 
 
 class AgentExecutionError(RuntimeError):
     """Falha ao executar o agente (ex.: erro do provedor de LLM)."""
+
+
+class ThreadNotFoundError(LookupError):
+    """O thread_id informado não existe (nunca existiu, expirou ou foi apagado)."""
 
 
 @dataclass(frozen=True)
@@ -50,22 +55,34 @@ class AgentEvent:
     data: dict[str, Any]
 
 
-def new_thread_id() -> str:
-    return uuid.uuid4().hex
-
-
 class AgentService:
     """Executa tarefas em linguagem natural usando o grafo do agente."""
 
-    def __init__(self, graph: CompiledStateGraph, max_iterations: int) -> None:
+    def __init__(
+        self, graph: CompiledStateGraph, store: ConversationStore, max_iterations: int
+    ) -> None:
         self._graph = graph
+        self._store = store
         # Rede de segurança: cada iteração usa ~2 passos (agent + tools),
         # mais folga para o nó final. O limite "de negócio" fica no próprio grafo.
         self._recursion_limit = max_iterations * 2 + 3
 
+    async def resolve_thread(self, thread_id: str | None) -> str:
+        """Cria uma conversa nova ou valida uma existente.
+
+        Só o servidor cria ``thread_id``s. Assim um cliente não consegue
+        escolher (ou adivinhar) o id da conversa de outra pessoa.
+        """
+        if thread_id is None:
+            return await self._store.threads.create()
+        if not await self._store.threads.exists(thread_id):
+            raise ThreadNotFoundError("Conversa não encontrada ou expirada.")
+        await self._store.threads.touch(thread_id)
+        return thread_id
+
     async def run(self, message: str, thread_id: str | None = None) -> AgentResult:
         """Executa o agente e devolve a resposta completa."""
-        thread_id = thread_id or new_thread_id()
+        thread_id = await self.resolve_thread(thread_id)
         try:
             final_state = await self._graph.ainvoke(
                 self._inputs(message), config=self._config(thread_id)
@@ -77,9 +94,12 @@ class AgentService:
             raise AgentExecutionError("Falha ao consultar o modelo de linguagem.") from exc
         return _build_result(final_state, thread_id)
 
-    async def stream(self, message: str, thread_id: str | None = None) -> AsyncIterator[AgentEvent]:
-        """Executa o agente emitindo eventos à medida que acontecem."""
-        thread_id = thread_id or new_thread_id()
+    async def stream(self, message: str, thread_id: str) -> AsyncIterator[AgentEvent]:
+        """Executa o agente emitindo eventos à medida que acontecem.
+
+        ``thread_id`` já deve ter sido validado com ``resolve_thread`` (a rota faz
+        isso antes de abrir o stream, para ainda poder responder 404).
+        """
         config = self._config(thread_id)
         try:
             # "messages" entrega os tokens do modelo; "updates" entrega o
@@ -108,9 +128,8 @@ class AgentService:
         )
 
     async def delete_thread(self, thread_id: str) -> None:
-        """Apaga o histórico de uma conversa."""
-        if self._graph.checkpointer is not None:
-            await self._graph.checkpointer.adelete_thread(thread_id)
+        """Apaga o histórico de uma conversa (idempotente)."""
+        await self._store.delete(thread_id)
 
     def _config(self, thread_id: str) -> RunnableConfig:
         return {

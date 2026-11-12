@@ -22,6 +22,7 @@ Cliente HTTP
 ```
 
 `app/static/index.html` é a interface web (HTML, CSS e JS puros).
+`app/memory.py` cuida da memória persistente e `app/security.py` dos controles de segurança.
 `app/config.py` centraliza as configurações (lidas de variáveis de ambiente).
 `app/main.py` cria a aplicação FastAPI e registra os tratadores de erro.
 
@@ -60,32 +61,42 @@ graph TD
 | `pydantic-settings` + `SecretStr` | Chave apenas em variável de ambiente/`.env`; `SecretStr` evita que ela apareça em logs ou `repr`. |
 | Serviço criado sob demanda | A API sobe e o `/health` responde mesmo sem chave; `/chat` devolve 503 com instrução clara. Como o FastAPI resolve dependências antes de validar o corpo, sem chave configurada o 503 aparece antes de um eventual 422. |
 | Tratadores de exceção globais | Erros do provedor viram 502, falta de configuração vira 503, qualquer outro erro vira 500 genérico sem vazar detalhes internos. |
-| Memória com checkpointer + `thread_id` | O LangGraph salva o estado da conversa a cada passo. O cliente só guarda o `thread_id`; o histórico fica no servidor. `InMemorySaver` não exige dependências, mas é volátil (veja limitações). |
+| Memória com checkpointer + `thread_id` | O LangGraph salva o estado da conversa a cada passo. O cliente só guarda o `thread_id`; o histórico fica no servidor. |
+| SQLite (`AsyncSqliteSaver`) | Persistente, sem servidor de banco para instalar e suficiente para um único processo. O pacote oficial do LangGraph cuida do formato dos checkpoints; trocar por PostgreSQL é mudar uma linha em `open_sqlite_store`. |
+| Tabela `threads` separada | O checkpointer não guarda "quando a conversa foi usada". A tabela própria permite (1) aceitar só ids criados pelo servidor e (2) apagar conversas inativas (`CONVERSATION_TTL_HOURS`), na inicialização e a cada hora. |
+| Repositório com duas implementações | `ThreadRepository` (Protocol) tem versão SQLite (produção) e em memória (testes). O serviço não sabe qual está usando. |
+| `thread_id` gerado pelo servidor | Se o cliente pudesse escolher o id (ex.: `"conversa-1"`), poderia adivinhar o de outra pessoa. Com 128 bits aleatórios e 404 para ids desconhecidos, o id funciona como uma senha da conversa. |
+| Token opcional + limite de requisições | Protegem a cota do LLM: sem eles, qualquer pessoa com o endereço do servidor gastaria seus créditos. O token é comparado com `secrets.compare_digest` (tempo constante). O limite usa janela deslizante em memória, com número máximo de clientes rastreados. |
+| CSP estrita na interface | JS e CSS em arquivos próprios permitem `script-src 'self'` sem `unsafe-inline`: mesmo se um texto malicioso escapasse, o navegador não executaria scripts injetados. |
 | Histórico enviado ao modelo é cortado | `trim_messages` envia só as `MAX_HISTORY_MESSAGES` mais recentes, começando sempre numa pergunta do usuário, para não separar um pedido de ferramenta do seu resultado. Uma validação garante que o limite comporta um turno completo. |
 | Limite de iterações reescreve a última mensagem | Quando o limite é atingido, a mensagem que pedia uma ferramenta é substituída (mesmo `id`) pelo aviso. Sem isso, o histórico salvo teria uma chamada sem resposta e o Gemini rejeitaria o turno seguinte. |
 | Streaming com SSE nativo do FastAPI | `EventSourceResponse` + `ServerSentEvent`, sem bibliotecas extras. O grafo é executado com `stream_mode=["messages", "updates"]`: tokens do modelo e resultados das ferramentas. A validação roda numa dependência, antes de o streaming começar, para ainda ser possível devolver 422/503. |
-| Interface sem framework | Um único `index.html` servido pela API. `fetch` + leitura do stream (o `EventSource` do navegador não suporta POST). O texto é inserido com `textContent`, nunca `innerHTML`, para evitar XSS. |
+| Interface sem framework | `index.html` + `app.js` + `app.css` servidos pela API. `fetch` + leitura do stream (o `EventSource` do navegador não suporta POST). O texto é inserido com `textContent`, nunca `innerHTML`, para evitar XSS. |
 
 ## Códigos HTTP do `POST /chat`
 
 | Código | Quando |
 | --- | --- |
 | 200 | Resposta gerada (inclusive quando o limite de iterações é atingido). |
+| 401 | `ATLAS_API_TOKEN` definido e token ausente ou incorreto. |
+| 404 | `thread_id` desconhecido, expirado ou apagado. |
+| 413 | Corpo maior que `MAX_REQUEST_BYTES`. |
 | 422 | Corpo inválido: mensagem ausente, vazia, só espaços, tipo errado, campo extra ou acima de `MAX_MESSAGE_LENGTH`. |
 | 502 | Falha ao consultar o Gemini (rede, cota, chave inválida) ou resposta vazia do modelo. |
+| 429 | Limite de requisições atingido (veja o cabeçalho `Retry-After`). |
 | 503 | `GEMINI_API_KEY` não configurada. |
 | 500 | Erro inesperado (detalhes apenas no log). |
 
-No `POST /chat/stream`, 422 e 503 funcionam igual (são verificados antes do stream).
+No `POST /chat/stream`, 401, 404, 413, 422, 429 e 503 funcionam igual (são verificados antes do stream).
 Falhas durante a execução chegam como evento `error`, porque o status 200 já foi enviado.
 
 ## Limitações conhecidas
 
-- **Memória volátil**: o `InMemorySaver` perde as conversas ao reiniciar e cresce sem
-  limite enquanto o processo roda. Adequado para desenvolvimento e demonstração; em
-  produção, use um checkpointer persistente com expiração de conversas.
-- **Sem autenticação**: quem conhece um `thread_id` pode continuar ou apagar a conversa.
-  Os ids são aleatórios (UUID4), mas não substituem autenticação.
+- **Um único processo**: o SQLite e o limite de requisições em memória funcionam para
+  um processo do servidor. Para vários processos/máquinas: PostgreSQL + Redis.
+- **Token único, sem contas de usuário**: quem tem o token e um `thread_id` pode
+  continuar ou apagar aquela conversa. O próximo passo seria ligar cada conversa a um dono.
+- **O token na interface** fica no `sessionStorage` da aba; use sempre HTTPS em produção.
 - **Requisições simultâneas no mesmo `thread_id`** não são serializadas.
 
 ## Estratégia de testes
@@ -97,4 +108,8 @@ Falhas durante a execução chegam como evento `error`, porque o status 200 já 
 - **Memória**: conversas no mesmo `thread_id` e em threads diferentes, corte do histórico,
   histórico válido após o limite de iterações e exclusão de conversas.
 - **Streaming**: ordem dos eventos SSE, evento `error` e validação antes do stream.
+- **Persistência**: o banco SQLite é fechado e reaberto (simulando um reinício) e o agente
+  continua lembrando a conversa; exclusão e expiração de conversas.
+- **Segurança**: token (ausente, errado, correto), 429 com `Retry-After`, ids escolhidos
+  pelo cliente (422) ou desconhecidos (404), cabeçalhos, CSP e corpo grande demais (413).
 - **API**: `TestClient` + `app.dependency_overrides` para injetar o agente falso.

@@ -8,7 +8,7 @@ executa ações, observa os resultados e responde ao usuário.
 Construído com **Python 3.11+, LangGraph, LangChain, Gemini, FastAPI e Pydantic**.
 
 > Projeto de portfólio em evolução: um único agente com três ferramentas,
-> memória de conversa, streaming e uma interface web responsiva.
+> memória persistente, streaming, interface web responsiva e controles de segurança.
 
 ## Funcionalidades
 
@@ -19,11 +19,12 @@ Construído com **Python 3.11+, LangGraph, LangChain, Gemini, FastAPI e Pydantic
   - `get_current_datetime` – data, hora e dia da semana em qualquer fuso IANA
   - `generate_report` – grava relatórios `.txt` em um diretório isolado
 - Limite configurável de iterações do agente
-- Memória de conversa por `thread_id` (checkpointer do LangGraph)
+- Memória de conversa persistente em SQLite, com expiração automática
 - Streaming das respostas via Server-Sent Events (`POST /chat/stream`)
 - Interface web responsiva (claro/escuro), sem dependências de front-end
 - Validação de entrada com Pydantic e tratamento de erros com códigos HTTP adequados
-- 83 testes automatizados que **não precisam de chave de API**
+- Token de acesso, limite de requisições, CSP e cabeçalhos de segurança
+- 101 testes automatizados que **não precisam de chave de API**
 
 ## Estrutura
 
@@ -32,6 +33,8 @@ app/
 ├── main.py            # cria a aplicação FastAPI e os tratadores de erro
 ├── config.py          # configurações via variáveis de ambiente
 ├── llm.py             # criação do modelo Gemini
+├── memory.py          # memória persistente (SQLite) e expiração de conversas
+├── security.py        # token, limite de requisições, cabeçalhos
 ├── api/
 │   ├── routes.py      # /, /health, /chat, /chat/stream, /threads
 │   ├── schemas.py     # modelos Pydantic de entrada/saída
@@ -41,7 +44,9 @@ app/
 │   ├── service.py     # executa o grafo e trata erros
 │   └── prompts.py
 ├── static/
-│   └── index.html     # interface web
+│   ├── index.html     # interface web
+│   ├── app.js
+│   └── app.css
 └── tools/
     ├── calculator.py
     ├── datetime_tool.py
@@ -110,9 +115,12 @@ curl -X POST http://localhost:8000/chat \
   -d '{"message": "E quanto é isso por ano?", "thread_id": "<thread_id da resposta anterior>"}'
 ```
 
-A memória fica em RAM (`InMemorySaver`): é perdida ao reiniciar o servidor e não
-é compartilhada entre processos. Em produção, o próximo passo é um checkpointer
-persistente (ex.: PostgreSQL).
+- As conversas ficam em `data/atlas.db` (SQLite) e **sobrevivem a reinícios**.
+- Só o servidor cria `thread_id`s (128 bits aleatórios). Um id desconhecido,
+  expirado ou apagado devolve **404**: o cliente não consegue inventar ou adivinhar
+  o id de outra conversa.
+- Conversas sem uso há mais de `CONVERSATION_TTL_HOURS` (padrão: 72 h) são apagadas
+  automaticamente; `DELETE /threads/{thread_id}` apaga na hora.
 
 ### Streaming
 
@@ -165,6 +173,11 @@ sem acesso à rede e sem chave de API.
 | `REPORTS_DIR` | `reports` | Diretório onde os relatórios são gravados |
 | `MAX_MESSAGE_LENGTH` | `2000` | Tamanho máximo da mensagem do usuário |
 | `LOG_LEVEL` | `INFO` | Nível de log |
+| `DATABASE_PATH` | `data/atlas.db` | Arquivo SQLite da memória |
+| `CONVERSATION_TTL_HOURS` | `72` | Conversas inativas por mais tempo são apagadas |
+| `ATLAS_API_TOKEN` | — | Token exigido em `Authorization: Bearer` (mín. 16 caracteres). Vazio = API aberta |
+| `RATE_LIMIT_PER_MINUTE` | `20` | Requisições por minuto por cliente nas rotas protegidas |
+| `MAX_REQUEST_BYTES` | `64000` | Tamanho máximo do corpo da requisição |
 
 ## Segurança
 
@@ -173,16 +186,28 @@ sem acesso à rede e sem chave de API.
 - Acesso a arquivos restrito ao diretório de relatórios, com nomes gerados pelo servidor.
 - Número de iterações do agente limitado.
 - Erros internos não são expostos ao cliente.
+- **Token de acesso** (`ATLAS_API_TOKEN`) para `/chat`, `/chat/stream` e `/threads`,
+  comparado em tempo constante. A interface web pede o token quando necessário.
+  Sem token, a API fica aberta e um aviso aparece no log.
+- **Limite de requisições** por cliente (429 + `Retry-After`), para proteger a cota do Gemini.
+- **`thread_id` gerado só pelo servidor**; ids desconhecidos devolvem 404.
+- **Retenção limitada**: conversas inativas são apagadas (privacidade/LGPD).
+- **Cabeçalhos de segurança** (`nosniff`, `X-Frame-Options`, `Referrer-Policy`) e
+  **CSP estrita** na interface (sem scripts inline ou de outros domínios).
+- Corpo da requisição limitado (413) e consultas SQL sempre parametrizadas.
+
+Para expor o servidor na internet: defina `ATLAS_API_TOKEN`, use HTTPS (proxy reverso)
+e rode o uvicorn com `--proxy-headers` para o limite de requisições enxergar o IP real.
 
 Detalhes em [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Próximos passos
 
-- Memória persistente (checkpointer em PostgreSQL ou SQLite)
+- Avaliação automática da escolha de ferramentas
+- Deploy público (ex.: Render ou Railway)
+- Contas de usuário (cada conversa ligada a um dono)
 - Endpoint para listar e baixar relatórios gerados
 - Observabilidade (tracing das execuções)
-- Avaliação automática da escolha de ferramentas
-- Autenticação e limite de requisições por usuário
 
 ## Licença
 

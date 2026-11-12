@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 from langchain_core.messages import AIMessage
 
 from app.api.dependencies import get_agent_service
+from app.config import get_settings
 from app.main import app
 from tests.fakes import tool_call
 
@@ -61,6 +62,7 @@ def test_chat_rejects_message_above_configured_limit(
     client: TestClient, make_service, monkeypatch
 ) -> None:
     monkeypatch.setenv("MAX_MESSAGE_LENGTH", "10")
+    get_settings.cache_clear()  # o lifespan do client já leu as configurações
     override_agent(make_service, [AIMessage(content="x")])
 
     response = client.post("/chat", json={"message": "x" * 11})
