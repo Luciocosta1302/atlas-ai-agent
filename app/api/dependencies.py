@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from functools import lru_cache
 
+from langgraph.checkpoint.memory import InMemorySaver
+
 from app.agent import AgentService, build_agent_graph
 from app.config import get_settings
 from app.llm import create_chat_model
@@ -22,5 +24,10 @@ def get_agent_service() -> AgentService:
         model=create_chat_model(settings),
         tools=build_tools(settings.default_timezone, settings.reports_dir),
         max_iterations=settings.agent_max_iterations,
+        max_history_messages=settings.max_history_messages,
+        # Memória em RAM: simples e sem dependências, mas se perde ao reiniciar
+        # e não é compartilhada entre processos. Em produção, troque por um
+        # checkpointer persistente (ex.: PostgresSaver).
+        checkpointer=InMemorySaver(),
     )
     return AgentService(graph, max_iterations=settings.agent_max_iterations)

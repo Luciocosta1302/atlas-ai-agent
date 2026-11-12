@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 from langchain_core.messages import AIMessage
+from langgraph.checkpoint.memory import InMemorySaver
 
 from app.agent import AgentService, build_agent_graph
 from app.api.dependencies import get_agent_service
@@ -37,13 +38,15 @@ def reports_dir(tmp_path: Path) -> Path:
 @pytest.fixture
 def make_service(reports_dir: Path) -> Callable[..., tuple[AgentService, ScriptedChatModel]]:
     def _make(
-        responses: list[AIMessage], max_iterations: int = 5
+        responses: list[AIMessage], max_iterations: int = 5, max_history_messages: int = 30
     ) -> tuple[AgentService, ScriptedChatModel]:
         model = ScriptedChatModel(responses=responses)
         graph = build_agent_graph(
             model=model,
             tools=build_tools("America/Sao_Paulo", reports_dir),
             max_iterations=max_iterations,
+            max_history_messages=max_history_messages,
+            checkpointer=InMemorySaver(),
         )
         return AgentService(graph, max_iterations=max_iterations), model
 

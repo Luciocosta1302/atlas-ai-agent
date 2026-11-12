@@ -10,6 +10,9 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 # verificado na rota, pois o schema é definido em tempo de importação.
 HARD_MAX_MESSAGE_LENGTH = 20_000
 
+# Letras, números, "_" e "-", até 64 caracteres (ex.: um UUID).
+THREAD_ID_PATTERN = r"^[A-Za-z0-9_-]{1,64}$"
+
 
 class ChatRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -20,6 +23,14 @@ class ChatRequest(BaseModel):
         max_length=HARD_MAX_MESSAGE_LENGTH,
         description="Tarefa em linguagem natural.",
         examples=["Quanto é (15 * 4) + 7?"],
+    )
+    thread_id: str | None = Field(
+        default=None,
+        pattern=THREAD_ID_PATTERN,
+        description=(
+            "Identificador da conversa. Envie o thread_id recebido na resposta "
+            "anterior para continuar a mesma conversa; omita para iniciar uma nova."
+        ),
     )
 
     @field_validator("message")
@@ -39,6 +50,7 @@ class ToolCallOut(BaseModel):
 
 class ChatResponse(BaseModel):
     answer: str
+    thread_id: str = Field(description="Use este valor para continuar a conversa.")
     iterations: int = Field(description="Quantas vezes o modelo foi chamado.")
     tool_calls: list[ToolCallOut] = Field(default_factory=list)
 

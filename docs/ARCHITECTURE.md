@@ -8,12 +8,12 @@ Cliente HTTP
     ▼
 ┌──────────────────────────── app/api ────────────────────────────┐
 │ schemas.py   → valida entrada/saída (Pydantic)                  │
-│ routes.py    → endpoint; converte AgentResult em ChatResponse   │
+│ routes.py    → /chat, /chat/stream (SSE), /threads, UI web      │
 │ dependencies.py → monta o AgentService (injeção de dependência) │
 └──────────────────────────────┬──────────────────────────────────┘
                                ▼
 ┌─────────────────────────── app/agent ───────────────────────────┐
-│ service.py → executa o grafo, trata erros, extrai a resposta    │
+│ service.py → executa o grafo (completo ou em streaming)         │
 │ graph.py   → StateGraph do LangGraph (loop ReAct)               │
 │ prompts.py → system prompt                                      │
 └───────────────┬─────────────────────────────────┬───────────────┘
@@ -21,6 +21,7 @@ Cliente HTTP
       app/llm.py (Gemini)               app/tools/ (ferramentas)
 ```
 
+`app/static/index.html` é a interface web (HTML, CSS e JS puros).
 `app/config.py` centraliza as configurações (lidas de variáveis de ambiente).
 `app/main.py` cria a aplicação FastAPI e registra os tratadores de erro.
 
@@ -59,7 +60,11 @@ graph TD
 | `pydantic-settings` + `SecretStr` | Chave apenas em variável de ambiente/`.env`; `SecretStr` evita que ela apareça em logs ou `repr`. |
 | Serviço criado sob demanda | A API sobe e o `/health` responde mesmo sem chave; `/chat` devolve 503 com instrução clara. Como o FastAPI resolve dependências antes de validar o corpo, sem chave configurada o 503 aparece antes de um eventual 422. |
 | Tratadores de exceção globais | Erros do provedor viram 502, falta de configuração vira 503, qualquer outro erro vira 500 genérico sem vazar detalhes internos. |
-| Requisição sem estado | Cada `/chat` é independente. Memória de conversa é uma evolução planejada (checkpointer do LangGraph). |
+| Memória com checkpointer + `thread_id` | O LangGraph salva o estado da conversa a cada passo. O cliente só guarda o `thread_id`; o histórico fica no servidor. `InMemorySaver` não exige dependências, mas é volátil (veja limitações). |
+| Histórico enviado ao modelo é cortado | `trim_messages` envia só as `MAX_HISTORY_MESSAGES` mais recentes, começando sempre numa pergunta do usuário, para não separar um pedido de ferramenta do seu resultado. Uma validação garante que o limite comporta um turno completo. |
+| Limite de iterações reescreve a última mensagem | Quando o limite é atingido, a mensagem que pedia uma ferramenta é substituída (mesmo `id`) pelo aviso. Sem isso, o histórico salvo teria uma chamada sem resposta e o Gemini rejeitaria o turno seguinte. |
+| Streaming com SSE nativo do FastAPI | `EventSourceResponse` + `ServerSentEvent`, sem bibliotecas extras. O grafo é executado com `stream_mode=["messages", "updates"]`: tokens do modelo e resultados das ferramentas. A validação roda numa dependência, antes de o streaming começar, para ainda ser possível devolver 422/503. |
+| Interface sem framework | Um único `index.html` servido pela API. `fetch` + leitura do stream (o `EventSource` do navegador não suporta POST). O texto é inserido com `textContent`, nunca `innerHTML`, para evitar XSS. |
 
 ## Códigos HTTP do `POST /chat`
 
@@ -71,10 +76,25 @@ graph TD
 | 503 | `GEMINI_API_KEY` não configurada. |
 | 500 | Erro inesperado (detalhes apenas no log). |
 
+No `POST /chat/stream`, 422 e 503 funcionam igual (são verificados antes do stream).
+Falhas durante a execução chegam como evento `error`, porque o status 200 já foi enviado.
+
+## Limitações conhecidas
+
+- **Memória volátil**: o `InMemorySaver` perde as conversas ao reiniciar e cresce sem
+  limite enquanto o processo roda. Adequado para desenvolvimento e demonstração; em
+  produção, use um checkpointer persistente com expiração de conversas.
+- **Sem autenticação**: quem conhece um `thread_id` pode continuar ou apagar a conversa.
+  Os ids são aleatórios (UUID4), mas não substituem autenticação.
+- **Requisições simultâneas no mesmo `thread_id`** não são serializadas.
+
 ## Estratégia de testes
 
 - **Ferramentas**: testes unitários puros (casos válidos, entradas maliciosas, limites).
 - **Agente**: `ScriptedChatModel` (em `tests/fakes.py`) é um `BaseChatModel` que
   devolve respostas roteirizadas, incluindo *tool calls*. Isso testa o grafo real
   (roteamento, execução de ferramentas, limite de iterações) sem chamar a API.
+- **Memória**: conversas no mesmo `thread_id` e em threads diferentes, corte do histórico,
+  histórico válido após o limite de iterações e exclusão de conversas.
+- **Streaming**: ordem dos eventos SSE, evento `error` e validação antes do stream.
 - **API**: `TestClient` + `app.dependency_overrides` para injetar o agente falso.

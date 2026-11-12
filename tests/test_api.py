@@ -30,7 +30,9 @@ def test_chat_success_with_tool_call(client: TestClient, make_service) -> None:
     response = client.post("/chat", json={"message": "  Quanto é 6 * 7?  "})
 
     assert response.status_code == 200
-    assert response.json() == {
+    body = response.json()
+    assert len(body.pop("thread_id")) == 32  # novo thread_id gerado pelo servidor
+    assert body == {
         "answer": "6 vezes 7 é 42.",
         "iterations": 2,
         "tool_calls": [{"name": "calculator", "args": {"expression": "6 * 7"}, "output": "42"}],
@@ -45,6 +47,9 @@ def test_chat_success_with_tool_call(client: TestClient, make_service) -> None:
         {"message": "    "},
         {"message": 123},
         {"message": "oi", "extra": "campo"},
+        {"message": "oi", "thread_id": "../../etc"},
+        {"message": "oi", "thread_id": "x" * 65},
+        {"message": "oi", "thread_id": ""},
     ],
 )
 def test_chat_rejects_invalid_input(client: TestClient, make_service, payload) -> None:
