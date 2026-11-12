@@ -1,0 +1,15 @@
+# Nunca enviar segredos ou dados locais para a imagem
+.env
+data/
+reports/
+
+.git/
+.github/
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+tests/
+docs/

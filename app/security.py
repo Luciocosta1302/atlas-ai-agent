@@ -93,20 +93,20 @@ class RateLimiter:
 
 
 def client_key(request: Request) -> str:
-    # Atrás de um proxy reverso, rode o uvicorn com --proxy-headers e
-    # --forwarded-allow-ips para que request.client seja o IP real do usuário.
-    # Nunca confie diretamente em X-Forwarded-For: o cliente pode forjá-lo.
+    # Usa o IP da conexão. Cabeçalhos como X-Forwarded-For NÃO são usados de
+    # propósito: muitas plataformas (ex.: Render) repassam o valor enviado pelo
+    # próprio cliente, que poderia forjar um IP novo a cada requisição para
+    # escapar do limite. Atrás de um proxy, todos os clientes compartilham o
+    # mesmo IP; o limite global abaixo continua protegendo a cota do LLM.
     return request.client.host if request.client else "desconhecido"
 
 
-def get_rate_limiter(request: Request) -> RateLimiter:
-    return request.app.state.rate_limiter
-
-
-def enforce_rate_limit(
-    request: Request, limiter: Annotated[RateLimiter, Depends(get_rate_limiter)]
-) -> None:
-    retry_after = limiter.check(client_key(request))
+def enforce_rate_limit(request: Request) -> None:
+    state = request.app.state
+    # Primeiro o limite do cliente: quem abusa é barrado sem gastar a cota global.
+    retry_after = state.rate_limiter.check(client_key(request))
+    if retry_after is None:
+        retry_after = state.global_rate_limiter.check("global")
     if retry_after is not None:
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,

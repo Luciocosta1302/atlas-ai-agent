@@ -35,6 +35,9 @@ class Settings(BaseSettings):
     # Segurança
     atlas_api_token: SecretStr | None = None
     rate_limit_per_minute: int = Field(default=20, ge=1)
+    # Teto para a soma de todos os clientes: limita o gasto com o LLM mesmo que
+    # alguém troque de IP (ou forje cabeçalhos de proxy) a cada requisição.
+    global_rate_limit_per_minute: int = Field(default=60, ge=1)
     max_request_bytes: int = Field(default=64_000, ge=1_024)
     log_level: str = "INFO"
 
