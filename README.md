@@ -1,5 +1,7 @@
 # Atlas AI
 
+[![CI](https://github.com/Luciocosta1302/atlas-ai-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/Luciocosta1302/atlas-ai-agent/actions/workflows/ci.yml)
+
 Agente de IA que recebe tarefas em linguagem natural, escolhe ferramentas,
 executa ações, observa os resultados e responde ao usuário.
 
@@ -87,7 +89,13 @@ que cada uma retornou, o que facilita depurar e explicar o comportamento do agen
 ```bash
 pip install -r requirements-dev.txt
 pytest
+
+# lint e formatação
+ruff check .
+ruff format --check .
 ```
+
+O GitHub Actions roda o lint e os testes (Python 3.11, 3.12 e 3.13) a cada push na `main` e em cada pull request.
 
 Os testes usam um modelo de chat falso (`tests/fakes.py`) que devolve respostas
 roteirizadas, inclusive chamadas de ferramenta. Assim o grafo real é exercitado

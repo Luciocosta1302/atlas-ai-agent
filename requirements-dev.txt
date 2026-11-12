@@ -4,3 +4,6 @@
 pytest>=9.2,<10
 pytest-asyncio>=1.4,<2
 httpx>=0.28,<1  # usado pelo TestClient do FastAPI
+
+# Qualidade de código
+ruff>=0.16,<0.17

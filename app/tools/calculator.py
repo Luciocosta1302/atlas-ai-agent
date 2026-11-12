@@ -61,9 +61,7 @@ def evaluate_expression(expression: str) -> int | float:
     if not expression:
         raise CalculatorError("A expressão está vazia.")
     if len(expression) > MAX_EXPRESSION_LENGTH:
-        raise CalculatorError(
-            f"A expressão excede o limite de {MAX_EXPRESSION_LENGTH} caracteres."
-        )
+        raise CalculatorError(f"A expressão excede o limite de {MAX_EXPRESSION_LENGTH} caracteres.")
 
     try:
         tree = ast.parse(expression, mode="eval")

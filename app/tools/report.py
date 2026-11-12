@@ -14,7 +14,7 @@ from __future__ import annotations
 import re
 import secrets
 import unicodedata
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from langchain_core.tools import BaseTool, StructuredTool
@@ -50,7 +50,7 @@ def write_report(title: str, content: str, reports_dir: Path) -> Path:
     base_dir = reports_dir.resolve()
     base_dir.mkdir(parents=True, exist_ok=True)
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     filename = f"{now:%Y%m%d-%H%M%S}-{slugify(title)}-{secrets.token_hex(3)}.txt"
     path = (base_dir / filename).resolve()
     if not path.is_relative_to(base_dir):  # defesa em profundidade
