@@ -1,10 +1,10 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
 from app.tools.datetime_tool import create_datetime_tool, describe_now
 
-FIXED_UTC = datetime(2026, 11, 12, 15, 30, 0, tzinfo=timezone.utc)
+FIXED_UTC = datetime(2026, 11, 12, 15, 30, 0, tzinfo=UTC)
 
 
 def test_describe_now_converts_to_requested_timezone() -> None:
