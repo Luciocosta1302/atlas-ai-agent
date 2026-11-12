@@ -24,7 +24,7 @@ Construído com **Python 3.11+, LangGraph, LangChain, Gemini, FastAPI e Pydantic
 - Interface web responsiva (claro/escuro), sem dependências de front-end
 - Validação de entrada com Pydantic e tratamento de erros com códigos HTTP adequados
 - Token de acesso, limite de requisições, CSP e cabeçalhos de segurança
-- 101 testes automatizados que **não precisam de chave de API**
+- 103 testes automatizados que **não precisam de chave de API**
 
 ## Estrutura
 
@@ -53,6 +53,8 @@ app/
     └── report.py
 tests/                 # pytest + modelo falso (tests/fakes.py)
 docs/ARCHITECTURE.md   # arquitetura e decisões técnicas
+docs/DEPLOY.md         # deploy (Render, Docker)
+Dockerfile, render.yaml
 ```
 
 ## Como executar
@@ -142,6 +144,17 @@ data: {"answer": "...", "thread_id": "...", "iterations": 2, "tool_calls": [...]
 
 Se algo falhar durante a execução, chega um evento `error` com `{"detail": "..."}`.
 
+## Deploy
+
+O repositório já vem pronto para publicação:
+
+- **Render** (gratuito): `render.yaml` cria o serviço a partir do `Dockerfile`; você só
+  informa a `GEMINI_API_KEY`, e o token de acesso é gerado automaticamente.
+- **Qualquer plataforma com Docker**: `docker build -t atlas-ai . && docker run -p 8000:8000 -e GEMINI_API_KEY=... atlas-ai`
+
+Passo a passo, limitações do plano gratuito e cuidados de segurança em
+[docs/DEPLOY.md](docs/DEPLOY.md).
+
 ## Testes
 
 ```bash
@@ -153,7 +166,7 @@ ruff check .
 ruff format --check .
 ```
 
-O GitHub Actions roda o lint e os testes (Python 3.11, 3.12 e 3.13) a cada push na `main` e em cada pull request.
+O GitHub Actions roda o lint, os testes (Python 3.11, 3.12 e 3.13) e o build + smoke test da imagem Docker a cada push na `main` e em cada pull request.
 
 Os testes usam um modelo de chat falso (`tests/fakes.py`) que devolve respostas
 roteirizadas, inclusive chamadas de ferramenta. Assim o grafo real é exercitado
@@ -177,6 +190,7 @@ sem acesso à rede e sem chave de API.
 | `CONVERSATION_TTL_HOURS` | `72` | Conversas inativas por mais tempo são apagadas |
 | `ATLAS_API_TOKEN` | — | Token exigido em `Authorization: Bearer` (mín. 16 caracteres). Vazio = API aberta |
 | `RATE_LIMIT_PER_MINUTE` | `20` | Requisições por minuto por cliente nas rotas protegidas |
+| `GLOBAL_RATE_LIMIT_PER_MINUTE` | `60` | Requisições por minuto somando todos os clientes |
 | `MAX_REQUEST_BYTES` | `64000` | Tamanho máximo do corpo da requisição |
 
 ## Segurança
@@ -197,14 +211,14 @@ sem acesso à rede e sem chave de API.
 - Corpo da requisição limitado (413) e consultas SQL sempre parametrizadas.
 
 Para expor o servidor na internet: defina `ATLAS_API_TOKEN`, use HTTPS (proxy reverso)
-e rode o uvicorn com `--proxy-headers` para o limite de requisições enxergar o IP real.
+e mantenha o limite global (`GLOBAL_RATE_LIMIT_PER_MINUTE`): ele protege a cota do Gemini
+mesmo quando o IP do cliente não é confiável (veja [docs/DEPLOY.md](docs/DEPLOY.md)).
 
 Detalhes em [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Próximos passos
 
 - Avaliação automática da escolha de ferramentas
-- Deploy público (ex.: Render ou Railway)
 - Contas de usuário (cada conversa ligada a um dono)
 - Endpoint para listar e baixar relatórios gerados
 - Observabilidade (tracing das execuções)

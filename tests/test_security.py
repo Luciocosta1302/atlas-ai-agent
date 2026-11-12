@@ -155,3 +155,29 @@ def test_web_ui_has_strict_csp(configure) -> None:
     assert "script-src 'self'" in csp
     assert "unsafe-inline" not in csp
     assert "frame-ancestors 'none'" in csp
+
+
+def test_global_limit_caps_all_clients_together(configure) -> None:
+    # Simula clientes diferentes trocando o IP a cada requisição.
+    with configure(RATE_LIMIT_PER_MINUTE="100", GLOBAL_RATE_LIMIT_PER_MINUTE="3") as client:
+        limiter = client.app.state.rate_limiter
+        statuses = []
+        for i in range(4):
+            limiter._hits.clear()  # "IP novo" a cada vez: o limite por cliente não ajuda
+            statuses.append(client.post("/chat", json={"message": f"oi {i}"}).status_code)
+
+    assert statuses == [200, 200, 200, 429]
+
+
+def test_forged_forwarded_for_header_is_ignored(configure) -> None:
+    with configure(RATE_LIMIT_PER_MINUTE="2") as client:
+        statuses = [
+            client.post(
+                "/chat",
+                json={"message": "oi"},
+                headers={"X-Forwarded-For": f"203.0.113.{i}"},
+            ).status_code
+            for i in range(3)
+        ]
+
+    assert statuses == [200, 200, 429]

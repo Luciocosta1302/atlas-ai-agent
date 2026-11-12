@@ -19,7 +19,8 @@ def create_chat_model(settings: Settings) -> BaseChatModel:
     """
     if settings.gemini_api_key is None or not settings.gemini_api_key.get_secret_value():
         raise MissingAPIKeyError(
-            "GEMINI_API_KEY não configurada. Copie .env.example para .env e preencha a chave."
+            "GEMINI_API_KEY não configurada. Defina a variável de ambiente "
+            "(localmente: copie .env.example para .env e preencha a chave)."
         )
     optional_params = {}
     if settings.gemini_temperature is not None:

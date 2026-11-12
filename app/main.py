@@ -49,6 +49,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             "Defina um token antes de expor o servidor na internet."
         )
     app.state.rate_limiter = RateLimiter(limit=settings.rate_limit_per_minute)
+    app.state.global_rate_limiter = RateLimiter(limit=settings.global_rate_limit_per_minute)
     async with open_sqlite_store(settings.database_path) as store:
         app.state.store = store
         purge_task = asyncio.create_task(purge_expired_periodically(store, settings))

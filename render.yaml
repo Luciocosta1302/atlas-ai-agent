@@ -1,0 +1,22 @@
+# Blueprint do Render: https://render.com/docs/blueprint-spec
+# Cria o serviço web a partir do Dockerfile deste repositório.
+services:
+  - type: web
+    name: atlas-ai
+    runtime: docker
+    plan: free
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      # Pedida no painel durante a criação (nunca fica no repositório).
+      - key: GEMINI_API_KEY
+        sync: false
+      # Token gerado aleatoriamente pelo Render; veja o valor em Environment.
+      - key: ATLAS_API_TOKEN
+        generateValue: true
+      - key: GEMINI_MODEL
+        value: gemini-3.5-flash-lite
+      - key: RATE_LIMIT_PER_MINUTE
+        value: "20"
+      - key: GLOBAL_RATE_LIMIT_PER_MINUTE
+        value: "60"

@@ -36,3 +36,16 @@ jobs:
       - run: pip install -r requirements-dev.txt
       # Sem GEMINI_API_KEY: os testes usam um modelo falso e não acessam a rede.
       - run: pytest -v
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build da imagem
+        run: docker build -t atlas-ai:ci .
+      - name: Smoke test do container
+        run: |
+          docker run -d --name atlas -p 8000:8000 atlas-ai:ci
+          for i in $(seq 1 30); do curl -sf localhost:8000/health && break; sleep 1; done
+          curl -sf localhost:8000/health
+          test "$(curl -s -o /dev/null -w '%{http_code}' localhost:8000/)" = "200"
