@@ -5,7 +5,7 @@ from __future__ import annotations
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import Field, SecretStr
+from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -21,11 +21,26 @@ class Settings(BaseSettings):
     llm_timeout_seconds: float = Field(default=60.0, gt=0)
 
     agent_max_iterations: int = Field(default=5, ge=1, le=20)
+    # Quantas mensagens do histórico da conversa são enviadas ao modelo.
+    max_history_messages: int = Field(default=30, ge=4, le=200)
     default_timezone: str = "America/Sao_Paulo"
     reports_dir: Path = Path("reports")
 
     max_message_length: int = Field(default=2000, ge=1, le=20_000)
     log_level: str = "INFO"
+
+    @model_validator(mode="after")
+    def history_fits_one_full_turn(self) -> Settings:
+        # Um turno pode gerar até 2 mensagens por iteração (pedido de ferramenta +
+        # resultado) mais a pergunta e a resposta. O histórico enviado ao modelo
+        # precisa caber ao menos um turno completo, senão o corte apagaria a
+        # pergunta atual.
+        minimum = 2 * self.agent_max_iterations + 2
+        if self.max_history_messages < minimum:
+            raise ValueError(
+                f"MAX_HISTORY_MESSAGES deve ser >= {minimum} (2 x AGENT_MAX_ITERATIONS + 2)."
+            )
+        return self
 
 
 @lru_cache

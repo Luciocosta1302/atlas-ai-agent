@@ -6,6 +6,10 @@
 
 O grafo foi escrito explicitamente com ``StateGraph`` (em vez de um agente
 pronto) para deixar visível cada etapa do loop e onde fica o limite de iterações.
+
+Memória: quando um ``checkpointer`` é informado, o LangGraph salva o estado ao
+fim de cada passo, separado por ``thread_id``. Na próxima requisição com o mesmo
+``thread_id``, o histórico anterior é carregado automaticamente.
 """
 
 from __future__ import annotations
@@ -14,8 +18,9 @@ from collections.abc import Sequence
 from typing import Literal
 
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import AIMessage, SystemMessage
+from langchain_core.messages import AIMessage, SystemMessage, trim_messages
 from langchain_core.tools import BaseTool
+from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import END, START, MessagesState, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.prebuilt import ToolNode
@@ -38,6 +43,8 @@ def build_agent_graph(
     model: BaseChatModel,
     tools: Sequence[BaseTool],
     max_iterations: int,
+    max_history_messages: int = 30,
+    checkpointer: BaseCheckpointSaver | None = None,
 ) -> CompiledStateGraph:
     """Monta e compila o grafo do agente.
 
@@ -46,12 +53,25 @@ def build_agent_graph(
             Receber o modelo por parâmetro permite usar um modelo falso nos testes.
         tools: ferramentas que o modelo pode chamar.
         max_iterations: número máximo de chamadas ao modelo por requisição.
+        max_history_messages: quantas mensagens recentes são enviadas ao modelo.
+        checkpointer: onde o estado das conversas é salvo (memória). ``None``
+            torna cada execução independente.
     """
     model_with_tools = model.bind_tools(tools)
     system_message = SystemMessage(content=SYSTEM_PROMPT)
 
     async def call_model(state: AgentState) -> dict:
-        response = await model_with_tools.ainvoke([system_message, *state["messages"]])
+        # Envia só as mensagens mais recentes, para o custo e o tamanho do
+        # contexto não crescerem sem limite. ``start_on="human"`` garante que o
+        # corte nunca separe um pedido de ferramenta do seu resultado.
+        history = trim_messages(
+            state["messages"],
+            max_tokens=max_history_messages,
+            token_counter=len,  # conta mensagens, não tokens
+            strategy="last",
+            start_on="human",
+        )
+        response = await model_with_tools.ainvoke([system_message, *history])
         return {"messages": [response], "iterations": state.get("iterations", 0) + 1}
 
     def route_after_model(
@@ -65,7 +85,11 @@ def build_agent_graph(
         return "tools"
 
     def stop_at_iteration_limit(state: AgentState) -> dict:
-        return {"messages": [AIMessage(content=ITERATION_LIMIT_MESSAGE)]}
+        # Substitui (mesmo id) o último pedido de ferramenta, que não será
+        # executado. Assim o histórico salvo não fica com uma chamada de
+        # ferramenta sem resposta, o que a API do Gemini rejeitaria no turno seguinte.
+        last_message = state["messages"][-1]
+        return {"messages": [AIMessage(content=ITERATION_LIMIT_MESSAGE, id=last_message.id)]}
 
     graph = StateGraph(AgentState)
     graph.add_node("agent", call_model)
@@ -78,4 +102,4 @@ def build_agent_graph(
     graph.add_conditional_edges("agent", route_after_model)
     graph.add_edge("tools", "agent")
     graph.add_edge("iteration_limit", END)
-    return graph.compile()
+    return graph.compile(checkpointer=checkpointer)
