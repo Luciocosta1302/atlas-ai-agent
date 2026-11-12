@@ -1,0 +1,20 @@
+# Segredos
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Saída da aplicação
+reports/
+
+# Editores / SO
+.vscode/
+.idea/
+.DS_Store

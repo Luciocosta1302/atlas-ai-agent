@@ -1,0 +1,10 @@
+# Dependências de execução
+langchain-core>=1.8,<2
+langgraph>=1.2,<2
+langchain-google-genai>=4.5,<5
+fastapi>=0.162,<1
+uvicorn[standard]>=0.54,<1
+pydantic>=2.13,<3
+pydantic-settings>=2.16,<3
+# Base de fusos horários IANA (o Windows não traz uma por padrão)
+tzdata>=2025.2; sys_platform == "win32"
